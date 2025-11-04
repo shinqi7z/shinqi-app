@@ -1,128 +1,362 @@
-# simple_streamlit_app.py
+# streamlit_app.py
 import streamlit as st
-import random
-import math
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon
+import requests
+import pandas as pd
+import json
+from PIL import Image
 import io
+import random
 
-st.set_page_config(page_title="Simple Generative Poster", layout="centered")
+# 页面配置
+st.set_page_config(
+    page_title="Explore Artworks with MET Museum API",
+    page_icon="🏛️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("Web-based Generative Poster")
+# 应用标题
+st.title("🏛️ Explore Artworks with MET Museum API")
+st.markdown("""
+### Arts & Advanced Big Data - Week 10
+**Sungkyunkwan University** | Prof. Jahwan Koo
 
-if st.button("Generate Poster"):
-    # 随机生成参数
-    seed = random.randint(1, 10000)
-    n_layers = random.randint(6, 15)
-    styles = ["default", "minimal", "vivid", "noisetouch", "organic", "aquatic"]
-    style_preset = random.choice(styles)
-    palette_styles = ["pastel", "vivid", "monochrome", "earth", "ocean"]
-    palette_style = random.choice(palette_styles)
+使用MET Museum的开放API探索世界艺术珍品
+""")
 
-    # 固定画布大小
-    size = (10, 12)
+# MET Museum API 基础URL
+MET_API_BASE = "https://collectionapi.metmuseum.org/public/collection/v1"
 
-    # 设置随机种子
-    random.seed(seed)
-    np.random.seed(seed)
+class METMuseumExplorer:
+    def __init__(self):
+        self.session = requests.Session()
+    
+    def search_artworks(self, query, limit=20):
+        """搜索艺术品"""
+        try:
+            # 搜索API
+            search_url = f"{MET_API_BASE}/search"
+            params = {
+                'q': query,
+                'hasImages': True  # 只返回有图片的作品
+            }
+            
+            response = self.session.get(search_url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                object_ids = data.get('objectIDs', [])[:limit]
+                
+                artworks = []
+                for obj_id in object_ids:
+                    artwork = self.get_artwork_details(obj_id)
+                    if artwork and artwork.get('primaryImage'):
+                        artworks.append(artwork)
+                
+                return artworks
+            else:
+                st.error(f"搜索失败: {response.status_code}")
+                return []
+        except Exception as e:
+            st.error(f"搜索过程中出现错误: {e}")
+            return []
+    
+    def get_artwork_details(self, object_id):
+        """获取艺术品详细信息"""
+        try:
+            details_url = f"{MET_API_BASE}/objects/{object_id}"
+            response = self.session.get(details_url)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+        except:
+            return None
+    
+    def get_random_artworks(self, limit=12):
+        """获取随机艺术品"""
+        try:
+            # 获取所有有图片的艺术品ID
+            search_url = f"{MET_API_BASE}/search"
+            params = {
+                'hasImages': True,
+                'q': ''  # 空搜索返回所有
+            }
+            
+            response = self.session.get(search_url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                all_ids = data.get('objectIDs', [])
+                
+                # 随机选择
+                random_ids = random.sample(all_ids, min(limit, len(all_ids)))
+                
+                artworks = []
+                for obj_id in random_ids:
+                    artwork = self.get_artwork_details(obj_id)
+                    if artwork and artwork.get('primaryImage'):
+                        artworks.append(artwork)
+                
+                return artworks
+            return []
+        except:
+            return []
 
-    # 创建图形
-    fig, ax = plt.subplots(1, 1, figsize=size)
-    ax.set_facecolor((0.98, 0.98, 0.97))
-    fig.patch.set_facecolor((0.98, 0.98, 0.97))
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.axis('off')
+# 侧边栏
+st.sidebar.header("🔍 Search Options")
 
-    # 生成调色板
-    def random_palette(k=5, style="pastel"):
-        palette = []
-        if style == "pastel":
-            for _ in range(k):
-                r = random.random() * 0.5 + 0.5
-                g = random.random() * 0.5 + 0.5
-                b = random.random() * 0.5 + 0.5
-                palette.append((r, g, b))
-        elif style == "vivid":
-            for _ in range(k):
-                r = random.random()
-                g = random.random()
-                b = random.random()
-                palette.append((r, g, b))
-        elif style == "monochrome":
-            base_hue = random.random()
-            for _ in range(k):
-                variation = random.random() * 0.3 + 0.4
-                palette.append((base_hue * variation, base_hue * variation, base_hue * variation))
-        elif style == "earth":
-            earth_colors = [(0.6, 0.4, 0.2), (0.8, 0.6, 0.4), (0.4, 0.3, 0.2), (0.7, 0.5, 0.3), (0.9, 0.7, 0.5)]
-            palette = random.sample(earth_colors, min(k, len(earth_colors)))
-        elif style == "ocean":
-            ocean_colors = [(0.2, 0.4, 0.8), (0.3, 0.5, 0.9), (0.1, 0.3, 0.6), (0.4, 0.7, 0.9), (0.2, 0.6, 0.8)]
-            palette = random.sample(ocean_colors, min(k, len(ocean_colors)))
-        else:
-            for _ in range(k):
-                palette.append((random.random(), random.random(), random.random()))
-        return palette
+# 搜索选项
+search_type = st.sidebar.radio(
+    "Search Type",
+    ["Keyword Search", "Random Exploration", "By Department"]
+)
 
-    # 生成形状的函数
-    def generate_blob(center=(0.5, 0.5), radius=0.3, complexity=5, wobble=0.15, points=200):
-        angles = np.linspace(0, 2 * math.pi, points)
-        radii = np.ones_like(angles) * radius
-        for i in range(complexity):
-            frequency = random.randint(2, 8)
-            amplitude = random.random() * wobble * radius
-            phase = random.random() * 2 * math.pi
-            radii += amplitude * np.sin(frequency * angles + phase)
-        radii = np.maximum(radii, radius * 0.2)
-        x = center[0] + radii * np.cos(angles)
-        y = center[1] + radii * np.sin(angles)
-        return x, y
+# 初始化探索器
+explorer = METMuseumExplorer()
 
-    palette = random_palette(n_layers + 3, palette_style)
-
-    # 创建图层
-    for i in range(n_layers):
-        center_x = 0.5 + (random.random() - 0.5) * 0.7
-        center_y = 0.5 + (random.random() - 0.5) * 0.7
-        radius = random.uniform(0.1, 0.4)
-        complexity = random.randint(4, 7)
-        wobble = random.uniform(0.1, 0.3)
-        alpha = random.uniform(0.3, 0.7)
-
-        x, y = generate_blob(
-            center=(center_x, center_y),
-            radius=radius,
-            complexity=complexity,
-            wobble=wobble
+# 主内容区域
+if search_type == "Keyword Search":
+    st.subheader("🔍 Search for Artworks")
+    
+    # 搜索框
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_query = st.text_input(
+            "Enter keywords to search:",
+            placeholder="e.g., flower, portrait, landscape...",
+            value="flower"
         )
+    with col2:
+        results_limit = st.number_input("Results limit", min_value=5, max_value=50, value=12)
+    
+    if st.button("Search Artworks", type="primary"):
+        if search_query:
+            with st.spinner("Searching MET Museum collection..."):
+                artworks = explorer.search_artworks(search_query, results_limit)
+                
+                if artworks:
+                    st.success(f"Found {len(artworks)} artworks!")
+                    
+                    # 显示艺术品网格
+                    cols = st.columns(3)
+                    for idx, artwork in enumerate(artworks):
+                        col = cols[idx % 3]
+                        
+                        with col:
+                            # 显示图片
+                            if artwork.get('primaryImage'):
+                                try:
+                                    response = requests.get(artwork['primaryImage'])
+                                    image = Image.open(io.BytesIO(response.content))
+                                    st.image(image, use_column_width=True)
+                                except:
+                                    st.image("https://via.placeholder.com/300x200?text=Image+Not+Available", 
+                                            use_column_width=True)
+                            
+                            # 显示信息
+                            title = artwork.get('title', 'Unknown Title')
+                            artist = artwork.get('artistDisplayName', 'Unknown Artist')
+                            date = artwork.get('objectDate', 'Unknown Date')
+                            department = artwork.get('department', 'Unknown Department')
+                            
+                            st.markdown(f"**{title}**")
+                            st.caption(f"**Artist:** {artist}")
+                            st.caption(f"**Date:** {date}")
+                            st.caption(f"**Department:** {department}")
+                            
+                            # 显示更多信息的按钮
+                            with st.expander("More Details"):
+                                st.write(f"**Culture:** {artwork.get('culture', 'N/A')}")
+                                st.write(f"**Medium:** {artwork.get('medium', 'N/A')}")
+                                st.write(f"**Dimensions:** {artwork.get('dimensions', 'N/A')}")
+                                
+                                if artwork.get('objectURL'):
+                                    st.markdown(f"[View on MET Website]({artwork['objectURL']})")
+                            
+                            st.markdown("---")
+                else:
+                    st.warning("No artworks found with images. Try different keywords.")
+        else:
+            st.warning("Please enter search keywords")
 
-        color = random.choice(palette)
-        vertices = np.column_stack([x, y])
-        polygon = Polygon(vertices, closed=True, facecolor=color, alpha=alpha, edgecolor='none', linewidth=0)
-        ax.add_patch(polygon)
+elif search_type == "Random Exploration":
+    st.subheader("🎲 Random Art Exploration")
+    st.markdown("Discover random artworks from the MET Museum collection")
+    
+    if st.button("Explore Random Artworks", type="primary"):
+        with st.spinner("Fetching random artworks from MET collection..."):
+            artworks = explorer.get_random_artworks(12)
+            
+            if artworks:
+                st.success(f"Showing {len(artworks)} random artworks!")
+                
+                # 显示随机艺术品网格
+                cols = st.columns(3)
+                for idx, artwork in enumerate(artworks):
+                    col = cols[idx % 3]
+                    
+                    with col:
+                        # 显示图片
+                        if artwork.get('primaryImage'):
+                            try:
+                                response = requests.get(artwork['primaryImage'])
+                                image = Image.open(io.BytesIO(response.content))
+                                st.image(image, use_column_width=True)
+                            except:
+                                st.image("https://via.placeholder.com/300x200?text=Image+Not+Available", 
+                                        use_column_width=True)
+                        
+                        # 显示信息
+                        title = artwork.get('title', 'Unknown Title')[:50] + "..." if len(artwork.get('title', '')) > 50 else artwork.get('title', 'Unknown Title')
+                        artist = artwork.get('artistDisplayName', 'Unknown Artist')
+                        date = artwork.get('objectDate', 'Unknown Date')
+                        
+                        st.markdown(f"**{title}**")
+                        st.caption(f"**Artist:** {artist}")
+                        st.caption(f"**Date:** {date}")
+                        
+                        st.markdown("---")
+            else:
+                st.error("Failed to fetch random artworks")
 
-    # 添加标题和信息
-    title_text = "Generative Poster | Arts & Advanced Big Data"
-    ax.text(0.5, 0.02, title_text, transform=ax.transAxes, ha='center', va='bottom', fontsize=10, alpha=0.7, color='#333333')
-    info_text = f"Layers: {n_layers} | Style: {style_preset} | Seed: {seed}"
-    ax.text(0.5, 0.96, info_text, transform=ax.transAxes, ha='center', va='top', fontsize=9, alpha=0.6, color='#666666')
+else:  # By Department
+    st.subheader("🏛️ Browse by Department")
+    
+    # MET Museum的主要部门
+    departments = {
+        "American Decorative Arts": "American Decorative Arts",
+        "Ancient Near Eastern Art": "Ancient Near Eastern Art",
+        "Arms and Armor": "Arms and Armor",
+        "Arts of Africa, Oceania, and the Americas": "Arts of Africa, Oceania, and the Americas",
+        "Asian Art": "Asian Art",
+        "The Cloisters": "The Cloisters",
+        "The Costume Institute": "The Costume Institute",
+        "Drawings and Prints": "Drawings and Prints",
+        "Egyptian Art": "Egyptian Art",
+        "European Paintings": "European Paintings",
+        "European Sculpture and Decorative Arts": "European Sculpture and Decorative Arts",
+        "Greek and Roman Art": "Greek and Roman Art",
+        "Islamic Art": "Islamic Art",
+        "The Robert Lehman Collection": "The Robert Lehman Collection",
+        "Medieval Art": "Medieval Art",
+        "Musical Instruments": "Musical Instruments",
+        "Photographs": "Photographs",
+        "Modern Art": "Modern Art"
+    }
+    
+    selected_dept = st.selectbox("Select Department:", list(departments.keys()))
+    
+    if st.button(f"Browse {selected_dept}", type="primary"):
+        with st.spinner(f"Searching {selected_dept} collection..."):
+            # 使用部门名称搜索
+            artworks = explorer.search_artworks(departments[selected_dept], 15)
+            
+            if artworks:
+                st.success(f"Found {len(artworks)} artworks in {selected_dept}!")
+                
+                # 显示部门艺术品网格
+                cols = st.columns(3)
+                for idx, artwork in enumerate(artworks):
+                    col = cols[idx % 3]
+                    
+                    with col:
+                        # 显示图片
+                        if artwork.get('primaryImage'):
+                            try:
+                                response = requests.get(artwork['primaryImage'])
+                                image = Image.open(io.BytesIO(response.content))
+                                st.image(image, use_column_width=True)
+                            except:
+                                st.image("https://via.placeholder.com/300x200?text=Image+Not+Available", 
+                                        use_column_width=True)
+                        
+                        # 显示信息
+                        title = artwork.get('title', 'Unknown Title')
+                        artist = artwork.get('artistDisplayName', 'Unknown Artist')
+                        date = artwork.get('objectDate', 'Unknown Date')
+                        
+                        st.markdown(f"**{title}**")
+                        st.caption(f"**Artist:** {artist}")
+                        st.caption(f"**Date:** {date}")
+                        
+                        st.markdown("---")
+            else:
+                st.warning(f"No artworks found in {selected_dept}. Try a different department.")
 
-    plt.tight_layout()
+# 特色搜索部分
+st.markdown("---")
+st.subheader("🚀 Quick Searches")
 
-    # 显示海报
-    st.pyplot(fig)
+quick_cols = st.columns(4)
 
-    # 提供下载
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
-    buf.seek(0)
-    st.download_button(
-        label="Download Poster",
-        data=buf,
-        file_name=f"poster_{seed}.png",
-        mime="image/png"
-    )
+with quick_cols[0]:
+    if st.button("🌺 Flowers", use_container_width=True):
+        st.session_state.search_query = "flower"
+        st.session_state.search_type = "Keyword Search"
+        st.rerun()
 
-    plt.close(fig)
+with quick_cols[1]:
+    if st.button("🎭 Portraits", use_container_width=True):
+        st.session_state.search_query = "portrait"
+        st.session_state.search_type = "Keyword Search"
+        st.rerun()
+
+with quick_cols[2]:
+    if st.button("🏞️ Landscape", use_container_width=True):
+        st.session_state.search_query = "landscape"
+        st.session_state.search_type = "Keyword Search"
+        st.rerun()
+
+with quick_cols[3]:
+    if st.button("⚔️ Armor", use_container_width=True):
+        st.session_state.search_query = "armor"
+        st.session_state.search_type = "Keyword Search"
+        st.rerun()
+
+# API信息部分
+with st.sidebar.expander("ℹ️ About MET Museum API"):
+    st.markdown("""
+    **MET Museum Open Access API**
+    
+    The Metropolitan Museum of Art provides public access to:
+    - 406,000+ high-resolution images
+    - Complete artwork metadata
+    - Search and browse functionality
+    
+    All data is available under Creative Commons Zero (CC0).
+    
+    [Learn More](https://metmuseum.github.io/)
+    """)
+
+# 技术信息
+with st.sidebar.expander("🔧 Technical Details"):
+    st.markdown("""
+    **Built with:**
+    - Streamlit (Web Framework)
+    - MET Museum API (Data Source)
+    - Requests (HTTP Client)
+    - Pillow (Image Processing)
+    
+    **API Endpoints Used:**
+    - `/search` - Search artworks
+    - `/objects/{id}` - Get artwork details
+    """)
+
+# 初始化session state
+if 'search_query' not in st.session_state:
+    st.session_state.search_query = "flower"
+if 'search_type' not in st.session_state:
+    st.session_state.search_type = "Keyword Search"
+
+# 页脚
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center; color: #666;'>
+    <p>Arts & Advanced Big Data | Week 10 - Open API Integration</p>
+    <p>Sungkyunkwan University | Prof. Jahwan Koo | 2024</p>
+    <p>Data provided by The Metropolitan Museum of Art</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
